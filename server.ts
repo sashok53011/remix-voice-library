@@ -64,25 +64,72 @@ function isAudioRequest(body: any): boolean {
 }
 
 /**
- * Extract the PCM payload from a WAV container (RIFF → `data` chunk).
- * Consumers of inlineData (Text Studio, AiTtsPreview) expect headerless
- * 16-bit PCM exactly like Gemini returns — a container would play as noise.
+ * Convert TTS container output into the PCM shape Gemini consumers expect:
+ * headerless 16-bit mono PCM at 24000 Hz (Text Studio and AiTtsPreview
+ * hardcode that rate — returning the gateway's native rate, typically 48000
+ * from Fish-TTS, would play "several times slower").
+ *
+ * Non-WAV payloads (mp3) pass through unchanged — best effort.
  */
-function wavToRawPcm(buf: Buffer): Buffer {
-  if (buf.length > 12 && buf.toString("ascii", 0, 4) === "RIFF") {
-    let offset = 12;
-    while (offset + 8 <= buf.length) {
-      const id = buf.toString("ascii", offset, offset + 4);
-      const size = buf.readUInt32LE(offset + 4);
-      if (id === "data") {
-        const start = offset + 8;
-        return buf.subarray(start, Math.min(start + size, buf.length));
-      }
-      offset += 8 + size + (size % 2);
+function toGeminiPcm(buf: Buffer): Buffer {
+  // --- parse RIFF: fmt + data chunks ---
+  if (buf.length <= 12 || buf.toString("ascii", 0, 4) !== "RIFF") return buf;
+  let offset = 12;
+  let channels = 0;
+  let sampleRate = 0;
+  let bitsPerSample = 0;
+  let data: Buffer | null = null;
+  while (offset + 8 <= buf.length) {
+    const id = buf.toString("ascii", offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    const start = offset + 8;
+    if (id === "fmt " && size >= 16) {
+      channels = buf.readUInt16LE(start + 2);
+      sampleRate = buf.readUInt32LE(start + 4);
+      bitsPerSample = buf.readUInt16LE(start + 14);
+    } else if (id === "data") {
+      data = buf.subarray(start, Math.min(start + size, buf.length));
     }
-    return buf.subarray(44);
+    offset += 8 + size + (size % 2);
   }
-  return buf;
+  if (!data || !sampleRate || !channels || bitsPerSample !== 16) return buf;
+
+  // --- bytes → Int16Array (copy guarantees alignment) ---
+  const ab = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  const interleaved = new Int16Array(ab);
+
+  // --- stereo → mono ---
+  let mono: Int16Array;
+  if (channels > 1) {
+    const frames = Math.floor(interleaved.length / channels);
+    mono = new Int16Array(frames);
+    for (let i = 0; i < frames; i++) {
+      let sum = 0;
+      for (let c = 0; c < channels; c++) sum += interleaved[i * channels + c];
+      mono[i] = Math.round(sum / channels);
+    }
+  } else {
+    mono = interleaved;
+  }
+
+  // --- resample to 24000 (linear interpolation) ---
+  if (sampleRate === 24000) return Buffer.from(mono.buffer.slice(0));
+  const ratio = sampleRate / 24000;
+  const outLength = Math.floor(mono.length / ratio);
+  const out = new Int16Array(outLength);
+  for (let i = 0; i < outLength; i++) {
+    const pos = i * ratio;
+    const i0 = Math.floor(pos);
+    const i1 = Math.min(i0 + 1, mono.length - 1);
+    const frac = pos - i0;
+    const value = mono[i0] * (1 - frac) + mono[i1] * frac;
+    out[i] = value > 32767 ? 32767 : value < -32768 ? -32768 : Math.round(value);
+  }
+  console.log(
+    `[Backend] TTS WAV: ${sampleRate} Hz × ${channels}ch → resampled to 24000 Hz mono ` +
+      `(${mono.length} → ${outLength} samples)`
+  );
+  return Buffer.from(out.buffer.slice(0));
 }
 
 /** Wrap raw PCM bytes into the Gemini-shaped audio response. */
@@ -205,7 +252,7 @@ async function startServer() {
             const text = contentsToText(req.body?.contents).trim();
             if (!text) throw new Error("Request contains no text to synthesize.");
             const { bytes } = await synthesizeTtsAudio(text, { responseFormat: "wav" });
-            return res.json(geminiAudioResponse(wavToRawPcm(bytes)));
+            return res.json(geminiAudioResponse(toGeminiPcm(bytes)));
           } catch (ttsError: any) {
             console.error("[Backend] custom TTS failed:", ttsError);
             return res.status(502).json({ error: ttsError?.message || "Custom TTS synthesis failed." });
