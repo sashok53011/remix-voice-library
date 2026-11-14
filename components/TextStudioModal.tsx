@@ -132,8 +132,16 @@ const TextStudioModal: React.FC<TextStudioModalProps> = ({ voices, onClose }) =>
   const [newModeEmoji, setNewModeEmoji] = useState('✨');
   const [newModeInstruction, setNewModeInstruction] = useState('');
 
+  // Manual emoji override for the next generation (empty = preset emoji).
+  // Fish-style TTS endpoints read emotion from emoji in the input text.
+  const [customEmoji, setCustomEmoji] = useState('');
+
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Currently selected preset (for emoji placeholder/hints outside the handler)
+  const activeMode =
+    intonationModes.find(m => m.id === selectedIntonationId) || intonationModes[0];
 
   // Batch line-by-line generation state
   const [isBatchRunning, setIsBatchRunning] = useState(false);
@@ -271,7 +279,7 @@ const TextStudioModal: React.FC<TextStudioModalProps> = ({ voices, onClose }) =>
           // feeds them to a custom TTS (emoji + clean line), while Gemini
           // keeps using the instruction prompt above and ignores them.
           ttsInput: lineText,
-          ttsEmoji: selectedMode.emoji,
+          ttsEmoji: customEmoji.trim() || selectedMode.emoji,
         });
 
         const audioDataBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
@@ -456,6 +464,28 @@ const TextStudioModal: React.FC<TextStudioModalProps> = ({ voices, onClose }) =>
                   </button>
                 );
               })}
+            </div>
+
+            {/* Manual emoji override for this run */}
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              <label
+                htmlFor="custom-emoji"
+                className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap"
+              >
+                Свой эмодзи / Custom emoji
+              </label>
+              <input
+                id="custom-emoji"
+                type="text"
+                value={customEmoji}
+                onChange={(e) => setCustomEmoji(e.target.value)}
+                placeholder={activeMode.emoji}
+                title="Переопределяет эмодзи пресета для этой генерации / Overrides the preset emoji for this run"
+                className="w-16 px-2 py-1.5 text-center text-base leading-none bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-900"
+              />
+              <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
+                пусто = пресет / empty = preset ({activeMode.emoji})
+              </span>
             </div>
 
             {/* Custom Mode Form */}
