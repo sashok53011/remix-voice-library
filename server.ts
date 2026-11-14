@@ -9,7 +9,8 @@ import net from "net";
 import "dotenv/config";
 import { GoogleGenAI } from "@google/genai";
 import { registerTtsRoutes } from "./ttsProxy";
-import { registerSettingsRoutes } from "./settingsProxy";
+import { registerSettingsRoutes, synthesizeTtsAudio } from "./settingsProxy";
+import { loadSettings } from "./settingsStore";
 import {
   isCustomLlmEnabled,
   runCustomLlm,
@@ -17,6 +18,7 @@ import {
   streamCustomLlm,
   streamCustomLlmMessages,
   toGeminiResponse,
+  contentsToText,
 } from "./openAiLlm";
 
 const MODEL_UPGRADES: Record<string, string> = {
@@ -49,6 +51,55 @@ function serializeGenerateContentResponse(r: any) {
 
 const chats = new Map<string, any>();
 const videoOps = new Map<string, any>();
+
+/**
+ * Speech requests (Text Studio, the Gemini TTS tab of the preview) must never
+ * reach a chat LLM: it answers with text and the client reports
+ * "No audio returned from API".
+ */
+function isAudioRequest(body: any): boolean {
+  const cfg = body?.config;
+  if (cfg?.speechConfig) return true;
+  return Array.isArray(cfg?.responseModalities) && cfg.responseModalities.includes("AUDIO");
+}
+
+/**
+ * Extract the PCM payload from a WAV container (RIFF → `data` chunk).
+ * Consumers of inlineData (Text Studio, AiTtsPreview) expect headerless
+ * 16-bit PCM exactly like Gemini returns — a container would play as noise.
+ */
+function wavToRawPcm(buf: Buffer): Buffer {
+  if (buf.length > 12 && buf.toString("ascii", 0, 4) === "RIFF") {
+    let offset = 12;
+    while (offset + 8 <= buf.length) {
+      const id = buf.toString("ascii", offset, offset + 4);
+      const size = buf.readUInt32LE(offset + 4);
+      if (id === "data") {
+        const start = offset + 8;
+        return buf.subarray(start, Math.min(start + size, buf.length));
+      }
+      offset += 8 + size + (size % 2);
+    }
+    return buf.subarray(44);
+  }
+  return buf;
+}
+
+/** Wrap raw PCM bytes into the Gemini-shaped audio response. */
+function geminiAudioResponse(pcm: Buffer): any {
+  return {
+    candidates: [
+      {
+        content: {
+          parts: [{ inlineData: { mimeType: "audio/L16;rate=24000", data: pcm.toString("base64") } }],
+          role: "model",
+        },
+        finishReason: "STOP",
+        index: 0,
+      },
+    ],
+  };
+}
 
 /**
  * A port counts as free only when BOTH address families can bind it:
@@ -145,8 +196,24 @@ async function startServer() {
 
   app.post("/api/generate-content", async (req, res): Promise<any> => {
     try {
-      // Custom OpenAI-compatible LLM (when enabled in Settings) replaces Gemini.
-      if (isCustomLlmEnabled()) {
+      if (isAudioRequest(req.body)) {
+        // Speech goes to a real TTS backend: the configured OpenAI-compatible
+        // endpoint when present, otherwise Gemini. Never the chat LLM.
+        const tts = loadSettings().tts;
+        if (tts.baseUrl.trim() && tts.apiKey.trim()) {
+          try {
+            const text = contentsToText(req.body?.contents).trim();
+            if (!text) throw new Error("Request contains no text to synthesize.");
+            const { bytes } = await synthesizeTtsAudio(text, { responseFormat: "wav" });
+            return res.json(geminiAudioResponse(wavToRawPcm(bytes)));
+          } catch (ttsError: any) {
+            console.error("[Backend] custom TTS failed:", ttsError);
+            return res.status(502).json({ error: ttsError?.message || "Custom TTS synthesis failed." });
+          }
+        }
+        // No custom TTS configured → fall through to Gemini TTS below.
+      } else if (isCustomLlmEnabled()) {
+        // Custom OpenAI-compatible LLM (when enabled in Settings) replaces Gemini.
         const { text } = await runCustomLlm(req.body);
         return res.json(toGeminiResponse(text, req.body?.model || "custom-llm"));
       }
@@ -173,7 +240,8 @@ async function startServer() {
       res.setHeader("Connection", "keep-alive");
 
       // Custom OpenAI-compatible LLM: SSE from the provider → Gemini NDJSON.
-      if (isCustomLlmEnabled()) {
+      // Audio-modality streams are excluded — a chat LLM cannot produce them.
+      if (isCustomLlmEnabled() && !isAudioRequest(req.body)) {
         try {
           for await (const chunk of streamCustomLlm(req.body)) {
             res.write(JSON.stringify(chunk) + "\n");

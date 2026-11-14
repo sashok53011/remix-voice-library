@@ -34,7 +34,7 @@ interface GeminiContent {
 }
 
 /** Extracts plain text from Gemini `contents` (string | {parts} | Content[]). */
-function contentsToText(contents: unknown): string {
+export function contentsToText(contents: unknown): string {
   if (typeof contents === "string") return contents;
   if (Array.isArray(contents)) {
     return contents

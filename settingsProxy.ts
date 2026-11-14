@@ -207,6 +207,43 @@ function sectionFrom(req: Request): SettingsSection {
   return section;
 }
 
+/**
+ * Synthesize speech with the configured OpenAI-compatible TTS endpoint.
+ * Shared by the modal's "Synthesize" test and the audio branch of
+ * `/api/generate-content` (Text Studio / TTS preview).
+ */
+export async function synthesizeTtsAudio(
+  text: string,
+  opts: { apiKey?: string; model?: string; voice?: string; responseFormat?: string } = {}
+): Promise<{ bytes: Buffer; contentType: string }> {
+  const settings = loadSettings();
+  const baseUrl = normalizeBaseUrl(settings.tts.baseUrl);
+  const key = requireKey("tts", opts.apiKey);
+  const model = String(opts.model || settings.tts.model || "tts-1");
+  const voice = String(opts.voice || settings.tts.voice || "alloy");
+
+  const payload: Record<string, unknown> = { model, input: text, voice };
+  if (opts.responseFormat) payload.response_format = opts.responseFormat;
+
+  const upstream = await fetch(`${baseUrl}/audio/speech`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: timeoutSignal(REQUEST_TIMEOUT_MS),
+  });
+  await mapUpstream(upstream);
+
+  const bytes = Buffer.from(await upstream.arrayBuffer());
+  if (bytes.byteLength === 0) {
+    throw new SettingsHttpError("UPSTREAM_ERROR", 502, "Provider returned empty audio.");
+  }
+  return { bytes, contentType: upstream.headers.get("content-type") || "audio/mpeg" };
+}
+
+/* ------------------------------------------------------------------ */
+/* Routes                                                              */
+/* ------------------------------------------------------------------ */
+
 export function registerSettingsRoutes(app: Express): void {
   // Read current settings (keys masked).
   app.get("/api/settings", (_req: Request, res: ExpressResponse) => {
@@ -324,25 +361,12 @@ export function registerSettingsRoutes(app: Express): void {
         throw new SettingsHttpError("BAD_REQUEST", 400, "Text too long (max 4000 characters).");
       }
 
-      const settings = loadSettings();
-      const baseUrl = normalizeBaseUrl(settings.tts.baseUrl);
-      const key = requireKey("tts", body.apiKey);
-      const model = String(body.model || settings.tts.model || "tts-1");
-      const voice = String(body.voice || settings.tts.voice || "alloy");
-
-      const upstream = await fetch(`${baseUrl}/audio/speech`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model, input: text, voice }),
-        signal: timeoutSignal(REQUEST_TIMEOUT_MS),
+      const { bytes, contentType } = await synthesizeTtsAudio(text, {
+        apiKey: body.apiKey,
+        model: body.model,
+        voice: body.voice,
       });
-      await mapUpstream(upstream);
-
-      const bytes = Buffer.from(await upstream.arrayBuffer());
-      if (bytes.byteLength === 0) {
-        throw new SettingsHttpError("UPSTREAM_ERROR", 502, "Provider returned empty audio.");
-      }
-      res.setHeader("Content-Type", upstream.headers.get("content-type") || "audio/mpeg");
+      res.setHeader("Content-Type", contentType);
       return res.send(bytes);
     } catch (error) {
       return sendError(res, error);
