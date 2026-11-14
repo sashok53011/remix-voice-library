@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { apiUrl } from "./lib/apiUrl";
+
 export const Type = {
   TYPE_UNSPECIFIED: "TYPE_UNSPECIFIED",
   STRING: "STRING",
@@ -76,7 +78,7 @@ export type GeneratedImage = any;
 export type GeneratedVideo = any;
 
 async function postJson(url: string, body: any) {
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -89,7 +91,7 @@ async function postJson(url: string, body: any) {
 }
 
 async function createNdjsonStream(url: string, body: any) {
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

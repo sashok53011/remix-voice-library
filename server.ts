@@ -7,7 +7,6 @@ import path from "path";
 import fs from "fs";
 import net from "net";
 import "dotenv/config";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { registerTtsRoutes } from "./ttsProxy";
 import { registerSettingsRoutes } from "./settingsProxy";
@@ -93,6 +92,22 @@ async function startServer() {
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // The deployed build uses base "/remix-voice-library/" (the portal proxy
+  // strips that prefix itself). This alias keeps direct access on
+  // http://host:PORT/remix-voice-library/... working too. It must be a GLOBAL
+  // middleware (no mount path) registered BEFORE any route: a mounted
+  // `app.use("/prefix", ...)` layer restores the original req.url before the
+  // next layer matches, which would undo the rewrite.
+  const APP_PREFIX = "/remix-voice-library";
+  app.use((req, _res, next) => {
+    const url = req.originalUrl;
+    if (url === APP_PREFIX || url.startsWith(APP_PREFIX + "/")) {
+      const rest = url.slice(APP_PREFIX.length) || "/";
+      req.url = rest.startsWith("/") ? rest : "/" + rest;
+    }
+    next();
+  });
 
   for (const dir of ["examples", "assets", "public"]) {
     const dirPath = path.join(process.cwd(), dir);
@@ -447,6 +462,9 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== "production") {
+    // Dynamic import: production bundles (dist/server.cjs) never load Vite,
+    // so the deployed server does not need vite installed.
+    const { createServer: createViteServer } = await import("vite");
     // Probe for a free HMR port: a stale dev server (or another project) may
     // already hold the preferred one, and Vite only warns — killing HMR.
     const hmrPort = await findFreePort(Number(process.env.VITE_HMR_PORT) || 24688);

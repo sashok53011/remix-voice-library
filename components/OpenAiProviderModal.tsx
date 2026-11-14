@@ -8,6 +8,7 @@ import {
   Plug, ListRestart, Save, MessageSquare, AudioLines, FileAudio,
 } from 'lucide-react';
 import { TRANSLATIONS, Language } from '../translations';
+import { apiUrl } from '../lib/apiUrl';
 
 interface OpenAiProviderModalProps {
   onClose: () => void;
@@ -142,7 +143,7 @@ const OpenAiProviderModal: React.FC<OpenAiProviderModalProps> = ({ onClose, lang
   /** Loads masked settings from the server; migrates the old localStorage config once. */
   const loadSettings = useCallback(async () => {
     try {
-      const res = await fetch('/api/settings');
+      const res = await fetch(apiUrl('/api/settings'));
       if (!res.ok) throw new Error(String(res.status));
       const data: MaskedSettings = await res.json();
       setSettings(data);
@@ -243,7 +244,7 @@ const OpenAiProviderModal: React.FC<OpenAiProviderModalProps> = ({ onClose, lang
       if (activeTab === 'tts') body.voice = (draft.voice || '').trim();
       if (activeTab === 'llm') body.enabled = Boolean(draft.enabled);
 
-      const res = await fetch(`/api/settings/${activeTab}`, {
+      const res = await fetch(apiUrl(`/api/settings/${activeTab}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -266,7 +267,7 @@ const OpenAiProviderModal: React.FC<OpenAiProviderModalProps> = ({ onClose, lang
     patchStatus(activeTab, { fetching: true, error: null, models: [], modelsNote: null });
     try {
       const params = new URLSearchParams({ baseUrl: draft.baseUrl.trim() });
-      const res = await fetch(`/api/settings/${activeTab}/models?${params.toString()}`, {
+      const res = await fetch(apiUrl(`/api/settings/${activeTab}/models?${params.toString()}`), {
         headers: keyHeaders(activeTab),
       });
       if (!res.ok) throw new Error(await readJsonError(res));
@@ -286,7 +287,7 @@ const OpenAiProviderModal: React.FC<OpenAiProviderModalProps> = ({ onClose, lang
     if (st.testing) return;
     patchStatus(activeTab, { testing: true, error: null, testOk: null, testLatency: null });
     try {
-      const res = await fetch(`/api/settings/${activeTab}/test`, {
+      const res = await fetch(apiUrl(`/api/settings/${activeTab}/test`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -313,7 +314,7 @@ const OpenAiProviderModal: React.FC<OpenAiProviderModalProps> = ({ onClose, lang
     setIsTtsLoading(true);
     setTtsError(null);
     try {
-      const res = await fetch('/api/settings/tts/speak', {
+      const res = await fetch(apiUrl('/api/settings/tts/speak'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -354,7 +355,7 @@ const OpenAiProviderModal: React.FC<OpenAiProviderModalProps> = ({ onClose, lang
         reader.readAsDataURL(sttFile);
       });
 
-      const res = await fetch('/api/settings/stt/transcribe', {
+      const res = await fetch(apiUrl('/api/settings/stt/transcribe'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

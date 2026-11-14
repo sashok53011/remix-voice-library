@@ -10,6 +10,7 @@
  */
 import { GoogleGenAI, Modality } from "../genaiProxy";
 import { Voice } from "../types";
+import { apiUrl } from "./apiUrl";
 
 export type TtsProviderId = "gemini" | "cartesia" | "deepgram" | "fishtts";
 
@@ -108,7 +109,7 @@ async function fetchVoiceOptions(
   provider: TtsProviderId,
   query?: string
 ): Promise<TtsVoiceOption[]> {
-  const url = `/api/tts/voices/${provider}` + (query ? `?q=${encodeURIComponent(query)}` : "");
+  const url = apiUrl(`/api/tts/voices/${provider}`) + (query ? `?q=${encodeURIComponent(query)}` : "");
   const res = await fetch(url, { headers: authHeaders(provider) });
   if (!res.ok) throw await readError(res);
   const data = await res.json();
@@ -119,7 +120,7 @@ async function postSynthesis(
   provider: TtsProviderId,
   body: Record<string, unknown>
 ): Promise<ArrayBuffer> {
-  const res = await fetch(`/api/tts/${provider}`, {
+  const res = await fetch(apiUrl(`/api/tts/${provider}`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders(provider) },
     body: JSON.stringify(body),
