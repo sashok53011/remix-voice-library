@@ -5,6 +5,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import net from "net";
 import "dotenv/config";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
@@ -50,9 +51,45 @@ function serializeGenerateContentResponse(r: any) {
 const chats = new Map<string, any>();
 const videoOps = new Map<string, any>();
 
+/**
+ * A port counts as free only when BOTH address families can bind it:
+ * a neighbour may hold the port IPv4-only (0.0.0.0) or IPv6-only ([::]),
+ * and on Windows those coexist with a single-family bind instead of
+ * conflicting — which would make `localhost` resolve to the other app.
+ */
+function canBind(port: number, host: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const probe = net.createServer();
+    probe.once("error", () => resolve(false));
+    probe.once("listening", () => probe.close(() => resolve(true)));
+    probe.listen(port, host);
+  });
+}
+
+/**
+ * A port counts as free only when BOTH probes pass. On Windows an IPv4-only
+ * (0.0.0.0) and an IPv6 ([::]) listener can share one port without clashing,
+ * so a single probe lies: the IPv4 probe misses [::]-only neighbours and the
+ * dualstack probe misses 0.0.0.0-only ones — either way `localhost` would
+ * resolve to the other app.
+ */
+async function isPortFree(port: number): Promise<boolean> {
+  if (!(await canBind(port, "0.0.0.0"))) return false;
+  return canBind(port, "::");
+}
+
+/** Returns `start` if free, otherwise the next free port in [start, start+tries). */
+async function findFreePort(start: number, tries = 30): Promise<number> {
+  for (let port = start; port < start + tries; port++) {
+    if (await isPortFree(port)) return port;
+    console.warn(`[Backend] Port ${port} is busy, probing ${port + 1}...`);
+  }
+  return start;
+}
+
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const preferredPort = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -410,12 +447,13 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== "production") {
+    // Probe for a free HMR port: a stale dev server (or another project) may
+    // already hold the preferred one, and Vite only warns — killing HMR.
+    const hmrPort = await findFreePort(Number(process.env.VITE_HMR_PORT) || 24688);
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        // 24678 is often taken by another dev server on this machine — use a
-        // project-specific HMR port instead of failing the WebSocket.
-        hmr: { port: Number(process.env.VITE_HMR_PORT) || 24688 },
+        hmr: { port: hmrPort },
       },
       appType: "spa",
     });
@@ -428,9 +466,48 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Backend] Server running on http://localhost:${PORT}`);
-  });
+  /**
+   * Listen on the preferred port, but when it is busy (another local dev
+   * server may have grabbed 3000) walk up to the next free port instead of
+   * crashing with EADDRINUSE.
+   *
+   * No explicit host: binds the IPv6 wildcard with IPv4 fallback (dualstack),
+   * so a port held by an IPv4- or IPv6-only process is detected as busy —
+   * binding 0.0.0.0 would silently coexist with an IPv6-only listener on the
+   * same port and make `localhost` resolve to the other app.
+   */
+  async function startListening(port: number, attemptsLeft: number): Promise<void> {
+    // Single-family binds can coexist with a neighbour on the same port
+    // (Windows), so check both families before committing to it.
+    if (!(await isPortFree(port))) {
+      if (attemptsLeft > 0) {
+        console.warn(`[Backend] Port ${port} is busy, trying ${port + 1}...`);
+        return startListening(port + 1, attemptsLeft - 1);
+      }
+      console.error(`[Backend] No free port found in [${preferredPort}, ${preferredPort + 20}).`);
+      process.exit(1);
+    }
+    const server = app.listen(port, () => {
+      console.log(`[Backend] Server running on http://localhost:${port}`);
+      if (port !== preferredPort) {
+        console.log(
+          `[Backend] Port ${preferredPort} was busy — using port ${port} instead. ` +
+            `Set PORT=<number> to pick a specific port.`
+        );
+      }
+    });
+    server.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE" && attemptsLeft > 0) {
+        console.warn(`[Backend] Port ${port} is busy, trying ${port + 1}...`);
+        startListening(port + 1, attemptsLeft - 1);
+      } else {
+        console.error(`[Backend] Could not start server on port ${port}:`, error);
+        process.exit(1);
+      }
+    });
+  }
+
+  startListening(preferredPort, 20);
 }
 
 startServer();

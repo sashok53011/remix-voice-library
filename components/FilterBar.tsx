@@ -66,8 +66,9 @@ const FilterBar: React.FC<FilterBarProps> = ({
         <div className="max-w-[1800px] mx-auto px-3 sm:px-6 lg:px-8 h-auto sm:h-16 py-1.5 sm:py-0">
             <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-x-2 gap-y-1 sm:gap-4 sm:h-full">
                 
-                {/* Left: Brand + AI Casting Button + Text Studio + OpenAI */}
-                <div className="flex items-center gap-2 sm:gap-3 shrink-0 overflow-x-auto scrollbar-hide py-1">
+                {/* Left: Brand + AI Casting Button + Text Studio + OpenAI.
+                    shrinkable + internal scroll: it can never overlap the right group */}
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0 overflow-x-auto scrollbar-hide py-1">
                     <div className="flex items-center gap-2 group select-none">
                         <div className="w-9 h-9 bg-zinc-900 dark:bg-zinc-100 rounded-xl flex items-center justify-center shadow-lg shadow-zinc-900/10 shrink-0">
                             <Mic size={18} className="text-white dark:text-zinc-900" />
@@ -107,11 +108,13 @@ const FilterBar: React.FC<FilterBarProps> = ({
                     </button>
                 </div>
 
-                {/* Right: Search, Filters & Actions */}
-                <div className="flex items-center gap-2 justify-end min-w-0 flex-1">
+                {/* Right: Search, Filters & Actions. Content-sized (never grows past
+                    its content, so justify can't push children out of the box) and
+                    scrollable; wraps to its own full-width row on phones. */}
+                <div className="flex items-center gap-2 justify-start min-w-0 w-full sm:w-auto overflow-x-auto scrollbar-hide py-1">
                     
                     {/* Search Input */}
-                    <div className="relative group w-full max-w-[120px] sm:max-w-[200px] transition-all">
+                    <div className="relative group w-full min-w-[110px] max-w-[120px] sm:max-w-[200px] transition-all">
                         <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-zinc-400 dark:text-zinc-500">
                             <Search size={14} />
                         </div>
@@ -125,7 +128,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
                     </div>
 
                     {/* Desktop Filter Dropdowns */}
-                    <div className="hidden xl:flex gap-2 shrink-0">
+                    <div className="hidden 2xl:flex gap-2 shrink-0">
                          <div className="relative group">
                             <select
                                 value={filters.gender}
@@ -246,7 +249,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
         </div>
         
         {/* Mobile Filters Sub-bar */}
-        <div className="xl:hidden border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
+        <div className="2xl:hidden border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
             <div className="px-4 py-2 flex gap-2 overflow-x-auto scrollbar-hide">
                  <select
                     value={filters.gender}
