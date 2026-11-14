@@ -249,7 +249,15 @@ async function startServer() {
         const tts = loadSettings().tts;
         if (tts.baseUrl.trim() && tts.apiKey.trim()) {
           try {
-            const text = contentsToText(req.body?.contents).trim();
+            // Preferred input: clean line + preset emoji (custom endpoints
+            // like Fish express emotion through emoji in the text).
+            const cleanText =
+              typeof req.body?.ttsInput === "string" && req.body.ttsInput.trim()
+                ? req.body.ttsInput.trim()
+                : contentsToText(req.body?.contents).trim();
+            const emoji =
+              typeof req.body?.ttsEmoji === "string" ? req.body.ttsEmoji.trim() : "";
+            const text = emoji ? `${emoji} ${cleanText}` : cleanText;
             if (!text) throw new Error("Request contains no text to synthesize.");
             const { bytes } = await synthesizeTtsAudio(text, { responseFormat: "wav" });
             return res.json(geminiAudioResponse(toGeminiPcm(bytes)));
@@ -271,7 +279,9 @@ async function startServer() {
         });
       }
       const ai = new GoogleGenAI({ apiKey });
-      const params = { ...req.body, model: resolveModel(req.body?.model) };
+      // Strip our custom TTS fields — the Gemini API only needs the prompt.
+      const { ttsInput: _dropTtsInput, ttsEmoji: _dropTtsEmoji, ...restBody } = req.body || {};
+      const params = { ...restBody, model: resolveModel(req.body?.model) };
       const response = await ai.models.generateContent(params);
       return res.json(serializeGenerateContentResponse(response));
     } catch (error: any) {
@@ -312,7 +322,9 @@ async function startServer() {
         });
       }
       const ai = new GoogleGenAI({ apiKey });
-      const params = { ...req.body, model: resolveModel(req.body?.model) };
+      // Strip our custom TTS fields — the Gemini API only needs the prompt.
+      const { ttsInput: _dropTtsInput, ttsEmoji: _dropTtsEmoji, ...restBody } = req.body || {};
+      const params = { ...restBody, model: resolveModel(req.body?.model) };
       const stream = await ai.models.generateContentStream(params);
       res.setHeader("Content-Type", "application/x-ndjson");
       res.setHeader("Cache-Control", "no-cache");

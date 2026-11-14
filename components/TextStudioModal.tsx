@@ -266,6 +266,12 @@ const TextStudioModal: React.FC<TextStudioModalProps> = ({ voices, onClose }) =>
               voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoiceName } },
             },
           },
+          // OpenAI-compatible TTS endpoints (Fish & co) express emotion via
+          // emoji embedded in the input text. Top-level fields: the server
+          // feeds them to a custom TTS (emoji + clean line), while Gemini
+          // keeps using the instruction prompt above and ignores them.
+          ttsInput: lineText,
+          ttsEmoji: selectedMode.emoji,
         });
 
         const audioDataBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
