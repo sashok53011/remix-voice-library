@@ -249,15 +249,18 @@ async function startServer() {
         const tts = loadSettings().tts;
         if (tts.baseUrl.trim() && tts.apiKey.trim()) {
           try {
-            // Preferred input: clean line + preset emoji (custom endpoints
-            // like Fish express emotion through emoji in the text).
+            // Preferred input: clean line + Fish S2 emotion tag
+            // ("[tag] text" at the sentence start).
             const cleanText =
               typeof req.body?.ttsInput === "string" && req.body.ttsInput.trim()
                 ? req.body.ttsInput.trim()
                 : contentsToText(req.body?.contents).trim();
-            const emoji =
-              typeof req.body?.ttsEmoji === "string" ? req.body.ttsEmoji.trim() : "";
-            const text = emoji ? `${emoji} ${cleanText}` : cleanText;
+            // Fish S2 emotion marker: [tag] at the start of the sentence.
+            // Normalization is idempotent: "happy", "[happy]" and "very excited"
+            // all become a single properly bracketed marker.
+            const rawTag = typeof req.body?.ttsTag === "string" ? req.body.ttsTag : "";
+            const tag = rawTag.replace(/^\[+|\]+$/g, "").trim();
+            const text = tag ? `[${tag}] ${cleanText}` : cleanText;
             if (!text) throw new Error("Request contains no text to synthesize.");
             const { bytes } = await synthesizeTtsAudio(text, { responseFormat: "wav" });
             return res.json(geminiAudioResponse(toGeminiPcm(bytes)));
@@ -280,7 +283,7 @@ async function startServer() {
       }
       const ai = new GoogleGenAI({ apiKey });
       // Strip our custom TTS fields — the Gemini API only needs the prompt.
-      const { ttsInput: _dropTtsInput, ttsEmoji: _dropTtsEmoji, ...restBody } = req.body || {};
+      const { ttsInput: _dropTtsInput, ttsTag: _dropTtsTag, ...restBody } = req.body || {};
       const params = { ...restBody, model: resolveModel(req.body?.model) };
       const response = await ai.models.generateContent(params);
       return res.json(serializeGenerateContentResponse(response));
@@ -323,7 +326,7 @@ async function startServer() {
       }
       const ai = new GoogleGenAI({ apiKey });
       // Strip our custom TTS fields — the Gemini API only needs the prompt.
-      const { ttsInput: _dropTtsInput, ttsEmoji: _dropTtsEmoji, ...restBody } = req.body || {};
+      const { ttsInput: _dropTtsInput, ttsTag: _dropTtsTag, ...restBody } = req.body || {};
       const params = { ...restBody, model: resolveModel(req.body?.model) };
       const stream = await ai.models.generateContentStream(params);
       res.setHeader("Content-Type", "application/x-ndjson");

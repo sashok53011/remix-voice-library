@@ -17,7 +17,9 @@ interface TextStudioModalProps {
 interface IntonationMode {
   id: string;
   name: string;
-  emoji: string;
+  // Fish S2 emotion marker (square brackets, placed at sentence start).
+  // Empty = no marker (neutral delivery).
+  tag: string;
   promptInstruction: string;
 }
 
@@ -31,15 +33,15 @@ interface BatchLineResult {
 }
 
 const INITIAL_INTONATION_MODES: IntonationMode[] = [
-  { id: 'normal', name: 'Normal / Standard', emoji: '😐', promptInstruction: 'Neutral, natural, clear professional delivery.' },
-  { id: 'angry', name: 'Angry / Злой', emoji: '😠', promptInstruction: 'Angry, aggressive, forceful, and tense tone.' },
-  { id: 'annoyed', name: 'Annoyed / Раздраженный', emoji: '🙄', promptInstruction: 'Annoyed, frustrated, impatient, and bothered tone.' },
-  { id: 'joyful', name: 'Joyful / Радостный', emoji: '😄', promptInstruction: 'Joyful, cheerful, upbeat, energetic, and happy tone.' },
-  { id: 'calm', name: 'Calm / Спокойный', emoji: '😌', promptInstruction: 'Calm, serene, peaceful, soothing, and relaxed tone.' },
-  { id: 'tired', name: 'Tired / Уставший', emoji: '🥱', promptInstruction: 'Tired, exhausted, weary, and low-energy tone.' },
-  { id: 'hysterical', name: 'Hysterical / Истеричный', emoji: '😱', promptInstruction: 'Hysterical, frantic, panicky, and overexcited tone.' },
-  { id: 'whispering', name: 'Whispering / Шепотом', emoji: '🤫', promptInstruction: 'Soft whispering, hushed, mysterious and secret tone.' },
-  { id: 'smile', name: 'With a smile / С ухмылкой', emoji: '😏', promptInstruction: 'Speaking with a warm smile, playful, amused and cheeky tone.' }
+  { id: 'normal', name: 'Normal / Standard', tag: '', promptInstruction: 'Neutral, natural, clear professional delivery.' },
+  { id: 'angry', name: 'Angry / Злой', tag: '[angry]', promptInstruction: 'Angry, aggressive, forceful, and tense tone.' },
+  { id: 'annoyed', name: 'Annoyed / Раздраженный', tag: '[frustrated]', promptInstruction: 'Annoyed, frustrated, impatient, and bothered tone.' },
+  { id: 'joyful', name: 'Joyful / Радостный', tag: '[happy]', promptInstruction: 'Joyful, cheerful, upbeat, energetic, and happy tone.' },
+  { id: 'calm', name: 'Calm / Спокойный', tag: '[calm]', promptInstruction: 'Calm, serene, peaceful, soothing, and relaxed tone.' },
+  { id: 'tired', name: 'Tired / Уставший', tag: '[tired]', promptInstruction: 'Tired, exhausted, weary, and low-energy tone.' },
+  { id: 'hysterical', name: 'Hysterical / Истеричный', tag: '[hysterical]', promptInstruction: 'Hysterical, frantic, panicky, and overexcited tone.' },
+  { id: 'whispering', name: 'Whispering / Шепотом', tag: '[whispering]', promptInstruction: 'Soft whispering, hushed, mysterious and secret tone.' },
+  { id: 'smile', name: 'With a smile / С ухмылкой', tag: '[playful]', promptInstruction: 'Speaking with a warm smile, playful, amused and cheeky tone.' }
 ];
 
 const PRESET_TEXTS = [
@@ -129,17 +131,17 @@ const TextStudioModal: React.FC<TextStudioModalProps> = ({ voices, onClose }) =>
   // Custom mode creation state
   const [showNewModeForm, setShowNewModeForm] = useState(false);
   const [newModeName, setNewModeName] = useState('');
-  const [newModeEmoji, setNewModeEmoji] = useState('✨');
+  const [newModeTag, setNewModeTag] = useState('');
   const [newModeInstruction, setNewModeInstruction] = useState('');
 
-  // Manual emoji override for the next generation (empty = preset emoji).
-  // Fish-style TTS endpoints read emotion from emoji in the input text.
-  const [customEmoji, setCustomEmoji] = useState('');
+  // Manual emotion-tag override for the next generation (empty = preset tag).
+  // Fish S2 reads emotion from [bracketed] markers at the sentence start.
+  const [customTag, setCustomTag] = useState('');
 
   const [fileName, setFileName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Currently selected preset (for emoji placeholder/hints outside the handler)
+  // Currently selected preset (for tag placeholder/hints outside the handler)
   const activeMode =
     intonationModes.find(m => m.id === selectedIntonationId) || intonationModes[0];
 
@@ -210,7 +212,7 @@ const TextStudioModal: React.FC<TextStudioModalProps> = ({ voices, onClose }) =>
     const customMode: IntonationMode = {
       id: newId,
       name: newModeName.trim(),
-      emoji: newModeEmoji || '✨',
+      tag: newModeTag.trim(),
       promptInstruction: newModeInstruction.trim()
     };
 
@@ -274,12 +276,12 @@ const TextStudioModal: React.FC<TextStudioModalProps> = ({ voices, onClose }) =>
               voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedVoiceName } },
             },
           },
-          // OpenAI-compatible TTS endpoints (Fish & co) express emotion via
-          // emoji embedded in the input text. Top-level fields: the server
-          // feeds them to a custom TTS (emoji + clean line), while Gemini
-          // keeps using the instruction prompt above and ignores them.
+          // Fish S2 emotion markers ([tag] at sentence start) travel as
+          // top-level fields: the server feeds them to a custom TTS
+          // ("[tag] clean line"), while Gemini keeps the instruction prompt
+          // above and ignores them.
           ttsInput: lineText,
-          ttsEmoji: customEmoji.trim() || selectedMode.emoji,
+          ttsTag: customTag.trim() || selectedMode.tag,
         });
 
         const audioDataBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
@@ -459,32 +461,32 @@ const TextStudioModal: React.FC<TextStudioModalProps> = ({ voices, onClose }) =>
                         : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200/60 dark:border-zinc-700/60'
                     }`}
                   >
-                    <span>{mode.emoji}</span>
+                    {mode.tag && <span className="font-mono">{mode.tag}</span>}
                     <span>{mode.name}</span>
                   </button>
                 );
               })}
             </div>
 
-            {/* Manual emoji override for this run */}
+            {/* Manual emotion-tag override for this run */}
             <div className="flex flex-wrap items-center gap-2 mt-1">
               <label
-                htmlFor="custom-emoji"
+                htmlFor="custom-tag"
                 className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap"
               >
-                Свой эмодзи / Custom emoji
+                Свой тег / Custom emotion tag
               </label>
               <input
-                id="custom-emoji"
+                id="custom-tag"
                 type="text"
-                value={customEmoji}
-                onChange={(e) => setCustomEmoji(e.target.value)}
-                placeholder={activeMode.emoji}
-                title="Переопределяет эмодзи пресета для этой генерации / Overrides the preset emoji for this run"
-                className="w-16 px-2 py-1.5 text-center text-base leading-none bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-900"
+                value={customTag}
+                onChange={(e) => setCustomTag(e.target.value)}
+                placeholder={activeMode.tag || '[tag]'}
+                title="Переопределяет тег эмоции пресета для этой генерации / Overrides the preset emotion tag for this run"
+                className="w-36 px-2 py-1.5 text-center text-sm font-mono leading-none bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-900"
               />
               <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
-                пусто = пресет / empty = preset ({activeMode.emoji})
+                пусто = пресет / empty = preset ({activeMode.tag || '—'})
               </span>
             </div>
 
@@ -505,12 +507,12 @@ const TextStudioModal: React.FC<TextStudioModalProps> = ({ voices, onClose }) =>
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] text-zinc-500 dark:text-zinc-400 mb-1">Emoji Icon</label>
+                    <label className="block text-[10px] text-zinc-500 dark:text-zinc-400 mb-1">Emotion tag (Fish S2)</label>
                     <input
                       type="text"
-                      placeholder="e.g. 😏"
-                      value={newModeEmoji}
-                      onChange={(e) => setNewModeEmoji(e.target.value)}
+                      placeholder="e.g. sarcastic или [sarcastic]"
+                      value={newModeTag}
+                      onChange={(e) => setNewModeTag(e.target.value)}
                       className="w-full p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs"
                     />
                   </div>
